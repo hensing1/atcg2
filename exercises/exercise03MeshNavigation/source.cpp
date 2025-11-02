@@ -1,3 +1,4 @@
+#include "OpenMesh/Core/Mesh/TriConnectivity.hh"
 #include <iostream>
 
 #include <Core/EntryPoint.h>
@@ -17,6 +18,7 @@ using VertexHandle = atcg::Mesh::VertexHandle;
 // Global mesh variable because we need it for the comparator
 std::shared_ptr<atcg::Mesh> mesh;
 OpenMesh::VPropHandleT<double> property_distance;
+OpenMesh::VPropHandleT<bool> property_visited;
 OpenMesh::VPropHandleT<VertexHandle> property_previous;
 
 class DistanceComparator
@@ -38,12 +40,11 @@ public:
                             const VertexHandle& vh_start,
                             const VertexHandle& vh_target)
     {
-        double distance = std::numeric_limits<double>::infinity();
-
         // Initialize the property with infinity to mark unvisited vertices
         for(auto vh: mesh->vertices())
         {
             mesh->property(property_distance, vh) = std::numeric_limits<double>::infinity();
+            mesh->property(property_visited, vh)  = false;
         }
 
         // The distance from the start vertex to itself is 0
@@ -70,10 +71,31 @@ public:
             // method,
             //   depending on which type of iterators you use for finding neighboring vertices.
 
-            // 
-        }
+            VertexHandle current = queue.top();
+            queue.pop();
 
-        return distance;
+            mesh->property(property_visited, current) = true;
+
+            if(current.idx() == vh_target.idx()) { return mesh->property(property_distance, current); }
+
+            atcg::Mesh::VertexOHalfedgeIter edge_iterator;    // iterator over outgoing halfedges
+            for(edge_iterator = mesh->voh_iter(current); edge_iterator.is_valid(); edge_iterator++)
+            {
+                VertexHandle neighbor = edge_iterator->to();
+                if(mesh->property(property_visited, neighbor)) { continue; }
+
+                double distance =
+                    mesh->property(property_distance, current) + mesh->calc_edge_length(edge_iterator->edge());
+
+                if(distance < mesh->property(property_distance, neighbor))
+                {
+                    mesh->property(property_distance, neighbor) = distance;
+                    mesh->property(property_previous, neighbor) = current;
+                    queue.push(neighbor);
+                }
+            }
+        }
+        return std::numeric_limits<double>::infinity();
     }
 
     //// Excercise 3: Use the distance values to trace a path from the target vertex back to the source vertex ////
@@ -89,7 +111,11 @@ public:
         // Hints:
         // - Each vertex on the path has a property with its previous vertex in the shortest path
         // - The source vertex has distance 0.
-        // 
+
+        while((current_vh = mesh->property(property_previous, current_vh)).is_valid())
+        {
+            result_path.push_back(current_vh);
+        }
         assert(mesh->property(property_distance, result_path.back()) == 0);
 
         std::reverse(result_path.begin(), result_path.end());
@@ -107,6 +133,7 @@ public:
 
         // Each vertex now holds a distance property (double)
         mesh->add_property(property_distance);
+        mesh->add_property(property_visited);
         mesh->add_property(property_previous);
 
         mesh->request_vertex_colors();
