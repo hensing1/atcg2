@@ -1,3 +1,4 @@
+#include "DataStructure/Mesh.h"
 #include <iostream>
 
 #include <Core/EntryPoint.h>
@@ -8,6 +9,8 @@
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <algorithm>
+
+#include <math.h>
 
 class Exercise03Layer : public atcg::Layer
 {
@@ -48,7 +51,33 @@ public:
             ///           - make sure to handle boundary (mesh->is_boundary) and feature (v_it->feature()) vertices
             ///           accordingly
 
-            // 
+
+            if(v_it->is_boundary())
+            {
+                std::vector<atcg::Mesh::VertexHandle> boundary_neighbors;
+                for(auto vv_it = v_it->vertices().begin(); vv_it != v_it->vertices().end(); vv_it++)
+                    if(vv_it->is_boundary()) boundary_neighbors.push_back(*vv_it);
+
+                if(boundary_neighbors.size() != 2) continue;
+
+                new_pos_property[*v_it] = mesh->point(*v_it) * 2 / 3 +
+                                          (mesh->point(boundary_neighbors[0]) + mesh->point(boundary_neighbors[1])) / 6;
+                continue;
+            }
+
+            uint valence           = v_it->valence();
+            double neighbor_weight = (4 - 2 * std::cos(2 * M_PI / valence)) / (9 * valence);
+
+            new_pos_property[*v_it] = (1 - valence * neighbor_weight) * mesh->point(*v_it);
+            for(auto vv_it = v_it->vertices().begin(); vv_it != v_it->vertices().end(); vv_it++)
+                new_pos_property[*v_it] += neighbor_weight * mesh->point(*vv_it);
+        }
+
+        // Set new vertex positions
+        for(auto v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); ++v_it)
+        {
+            if(mesh->is_boundary(*v_it) || v_it->feature()) continue;
+            mesh->point(*v_it) = new_pos_property[*v_it];
         }
 
         // Split faces
@@ -61,16 +90,18 @@ public:
             ///                   for (auto v_it = f_it->vertices().begin(); v_it != f_it->vertices().end(); ++v_it) {
             ///                   /*your code here*/ }
             ///           - split the faces at the centroid of each face (mesh->split)
-            ///
 
-            // 
-        }
+            uint vertex_count = 0;
+            auto midpoint     = atcg::Mesh::Point(0, 0, 0);
+            for(auto v_it = f_it->vertices().begin(); v_it != f_it->vertices().end(); ++v_it)
+            {
+                midpoint += mesh->point(*v_it);
+                vertex_count++;
+            }
+            if(vertex_count == 0) continue;
+            midpoint /= vertex_count;
 
-        // Set new vertex positions
-        for(auto v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); ++v_it)
-        {
-            if(mesh->is_boundary(*v_it) || v_it->feature()) continue;
-            mesh->point(*v_it) = new_pos_property[*v_it];
+            mesh->split(*f_it, midpoint);
         }
 
         // Flip old edges
@@ -83,7 +114,8 @@ public:
             ///           - make sure you don't flip an edge which is a feature edge which can be checked with
             ///           e_it->feature
 
-            // 
+            if(!mesh->is_flip_ok(e) || e_it->feature()) continue;
+            mesh->flip(e);
         }
 
         // Update rendering
