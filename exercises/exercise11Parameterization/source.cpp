@@ -1,3 +1,6 @@
+#include "OpenMesh/Core/Mesh/Handles.hh"
+#include "OpenMesh/Core/Mesh/TriConnectivity.hh"
+#include <cmath>
 #include <iostream>
 
 #include <Core/EntryPoint.h>
@@ -29,44 +32,71 @@ public:
         MEAN_VALUE
     };
 
-    std::vector<EdgeHandle> detect_boundary_edges(const std::shared_ptr<atcg::Mesh>& mesh)
+    std::vector<OpenMesh::SmartEdgeHandle> detect_boundary_edges(const std::shared_ptr<atcg::Mesh>& mesh)
     {
-        std::vector<EdgeHandle> boundary_edges;
+        std::vector<OpenMesh::SmartEdgeHandle> boundary_edges;
 
         /// Exercise: - Detect boundary edges
         ///           - You can use OpenMesh functions for this
 
-        //
+        OpenMesh::SmartHalfedgeHandle firstBoundaryEdge;
+        for (auto he_it = mesh->halfedges_begin(); he_it != mesh->halfedges_end(); he_it++) {
+            if (mesh->is_boundary(*he_it)) {
+                firstBoundaryEdge = *he_it;
+                boundary_edges.push_back(he_it->edge());
+                break;
+            }
+        }
+        OpenMesh::SmartHalfedgeHandle nextEdge = firstBoundaryEdge.next();
+        while (nextEdge.idx() != firstBoundaryEdge.idx()) {
+            if (!nextEdge.is_boundary()) {
+                std::cout << "ah shit fuck" << std::endl;
+                auto a = (int *)0;
+                *a = 4;
+            }
+            boundary_edges.push_back(nextEdge.edge());
+            nextEdge = nextEdge.next();
+        }
 
         return boundary_edges;
     }
 
-    std::vector<VertexHandle> detect_boundary_path(const std::shared_ptr<atcg::Mesh>& mesh,
-                                                   const std::vector<EdgeHandle>& boundary_edges)
+    std::vector<OpenMesh::SmartVertexHandle> detect_boundary_path(const std::shared_ptr<atcg::Mesh>& mesh,
+                                                   const std::vector<OpenMesh::SmartEdgeHandle>& boundary_edges)
     {
-        std::vector<VertexHandle> boundary_path;
+        std::vector<OpenMesh::SmartVertexHandle> boundary_path;
 
-        VertexHandle start      = mesh->from_vertex_handle(mesh->halfedge_handle(boundary_edges[0], 0));
-        VertexHandle current_to = mesh->to_vertex_handle(mesh->halfedge_handle(boundary_edges[0], 0));
-        boundary_path.push_back(start);
-        boundary_path.push_back(current_to);
+        // VertexHandle start      = mesh->from_vertex_handle(mesh->halfedge_handle(boundary_edges[0], 0));
+        // VertexHandle current_to = mesh->to_vertex_handle(mesh->halfedge_handle(boundary_edges[0], 0));
+        // boundary_path.push_back(start);
+        // boundary_path.push_back(current_to);
 
         /// Exercise: -Find the path of boundary edges
         ///           -Hint: This is an older exercise which I ported into this framework. There are more elegant
         ///           solutions but it is ok if your code is O(n^2) where n is the number of boundary edges
 
-        //
+        // whoops we already solved this one in a)
+
+        for (auto edge : boundary_edges) {
+            auto he = edge.halfedge(0);
+            auto outer = he.is_boundary() ? he : he.opp();
+            boundary_path.push_back(outer.from());
+        }
 
         return boundary_path;
     }
 
-    std::vector<double> path_length(const std::shared_ptr<atcg::Mesh>& mesh, const std::vector<VertexHandle>& path)
+    std::vector<double> path_length(const std::shared_ptr<atcg::Mesh>& mesh, const std::vector<OpenMesh::SmartVertexHandle>& path)
     {
         std::vector<double> path_lengths;
 
         /// Exercise: Compute the edge lengths
 
-        //
+        for (size_t i = 0; i < path.size() - 1; i++) {
+            auto diff = mesh->point(path[i]) - mesh->point(path[i+1]);
+            path_lengths.push_back(diff.length());
+        }
+        path_lengths.push_back((mesh->point(path[path.size()-1]) - mesh->point(path[0])).length());
 
         return path_lengths;
     }
@@ -76,13 +106,20 @@ public:
         double total_length = std::accumulate(edge_lengths.begin(), edge_lengths.end(), 0.0);
 
         std::vector<atcg::Mesh::Point> circle;
-        circle.push_back({1.0f, 0.0f, 0.0f});
+        // circle.push_back({1.0f, 0.0f, 0.0f});
 
         /// Exercise: -Map boundary edges onto a circle
         ///           -Begin with an angle of zero and increment it relative to the current edge length
         ///           -Use the parameterization of a circle in 2D. The third coordinate can be z = 0
 
-        //
+        size_t num_edges = edge_lengths.size();
+        double cumul_length = 0;
+        const double TAU = 6.2831853071;
+        for (size_t i = 0; i < num_edges; i++) {
+            double angle = TAU * cumul_length / total_length;  // small-angle approximation I hope this is ok
+            circle.push_back({cos(angle), sin(angle), 0});
+            cumul_length += edge_lengths[i];
+        }
 
         return circle;
     }
@@ -139,26 +176,31 @@ public:
             ///           -Keep the relationship between i and j in mind.
             ///           -Remember that Eigen::SparseMatrix.setFromTriplets adds values with the same indices
 
+            // why would we iterate over faces instead of half edges :(
+            // iterating over half edges would guarantee that every i-j pair would only appear once
+            // now we have to constantly worry about wether or not we are looking at a boundary edge
             switch(method)
             {
                 case WeightType::UNIFORM_SPRING:
                 {
                     // implement here uniform weights
-                    //
+                    wij = 0.5, wjk = 0.5, wki = 0.5;
+                    wji = 0.5, wkj = 0.5, wik = 0.5;
                 }
                 break;
 
                 case WeightType::CHORDAL_SPRING:
                 {
                     // implement here chordal spring weitghts: w = 1.0 / r^2
-                    //
+                    wij = 0.5 / (rij * rij), wjk = 0.5 / (rjk * rjk), wki = 0.5 / (rki * rki); 
+                    wji = 0.5 / (rij * rij), wkj = 0.5 / (rjk * rjk), wik = 0.5 / (rki * rki);
                 }
                 break;
 
                 case WeightType::WACHSPRESS:
                 {
                     // implement here the wachspress weights
-                    //
+
                 }
                 break;
 
@@ -172,7 +214,8 @@ public:
                 case WeightType::MEAN_VALUE:
                 {
                     // implement here the mean value weights
-                    //
+                    wij = tan(alphai / 2) / rij, wjk = tan(alphaj / 2) / rjk, wki = tan(alphak / 2) / wki;
+                    wji = tan(alphaj / 2) / rij, wkj = tan(alphak / 2) / rjk, wik = tan(alphai / 2) / wki;
                 }
                 break;
             }
@@ -192,7 +235,7 @@ public:
 
     Eigen::SparseMatrix<double> construct_operator(const std::shared_ptr<atcg::Mesh>& mesh,
                                                    const std::vector<Eigen::Triplet<double>>& coefficients,
-                                                   const std::vector<VertexHandle>& path)
+                                                   const std::vector<OpenMesh::SmartVertexHandle>& path)
     {
         Eigen::SparseMatrix<double> op(mesh->n_vertices(), mesh->n_vertices());
         /// Exercise: -Compute the operator (Slide 8)
@@ -204,13 +247,25 @@ public:
         ///            for this replace rows corresponding to boundary conditions to delta rows
         ///           -You can get row sums by computing op * 1, where 1 is a vector of ones
 
-        //
+        op.setFromTriplets(coefficients.begin(), coefficients.end());
+        Eigen::VectorXd ones(mesh->n_vertices());
+        ones.setOnes();
+        auto sums = op * ones;
+
+        Eigen::VectorXd normalizer = sums.cwiseInverse();
+        for (auto boundary : path) {
+            normalizer(boundary.idx()) = 0;
+        }
+        op = normalizer.asDiagonal() * op;  // boundary rows are now 0, interior rows are normed to 1
+
+        op *= -1;  // negative weights
+        op += ones.asDiagonal();  // 1's on the diagonal
 
         return op;
     }
 
     Eigen::MatrixXd construct_rhs(const std::shared_ptr<atcg::Mesh>& mesh,
-                                  const std::vector<VertexHandle>& path,
+                                  const std::vector<OpenMesh::SmartVertexHandle>& path,
                                   const std::vector<atcg::Mesh::Point>& boundary_constraints)
     {
         Eigen::MatrixXd rhs = Eigen::MatrixXd::Zero(mesh->n_vertices(), 3);
@@ -233,7 +288,7 @@ public:
     }
 
     Eigen::MatrixXd reparameterize(const std::shared_ptr<atcg::Mesh>& mesh,
-                                   const std::vector<VertexHandle>& path,
+                                   const std::vector<OpenMesh::SmartVertexHandle>& path,
                                    const std::vector<atcg::Mesh::Point>& constraints,
                                    const WeightType& method)
     {
@@ -384,8 +439,8 @@ private:
     std::shared_ptr<atcg::Mesh> mesh;
     std::shared_ptr<atcg::Mesh> mesh_original;
 
-    std::vector<EdgeHandle> boundary_edges;
-    std::vector<VertexHandle> boundary_path;
+    std::vector<OpenMesh::SmartEdgeHandle> boundary_edges;
+    std::vector<OpenMesh::SmartVertexHandle> boundary_path;
     std::vector<double> edge_lengths;
     std::vector<atcg::Mesh::Point> circle;
 
